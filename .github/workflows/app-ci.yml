@@ -1,0 +1,68 @@
+name: app-ci
+
+on:
+  pull_request:
+    paths:
+      - "app/**"
+      - ".github/workflows/app-*.yml"
+      - "mise.toml"
+  # Reused by app-cd, so main is tested again before every deploy
+  workflow_call:
+
+# Nothing by default, every job asks only for what it needs
+permissions: {}
+
+concurrency:
+  group: app-ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  test:
+    name: lint and test
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # Tool versions come from mise.toml, the same as on a laptop
+      - uses: jdx/mise-action@924e7c586e33d7d4bae9c14e26c5d22e2beb6e78 # v5.3.0
+        with:
+          install_args: go golangci-lint
+
+      - name: Lint
+        working-directory: app
+        run: golangci-lint run ./...
+
+      - name: Test
+        working-directory: app
+        run: go test -race -count=1 ./...
+
+  image:
+    name: build and scan image
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: jdx/mise-action@924e7c586e33d7d4bae9c14e26c5d22e2beb6e78 # v5.3.0
+        with:
+          install_args: trivy
+
+      # Fargate runs on ARM64, Go cross-compiles inside the Dockerfile so no QEMU is needed
+      - name: Build
+        run: docker build --platform linux/arm64 -t "status-api:${GITHUB_SHA}" app
+
+      - name: Scan image
+        run: trivy image --severity HIGH,CRITICAL --ignore-unfixed --exit-code 1 "status-api:${GITHUB_SHA}"

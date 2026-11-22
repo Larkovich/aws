@@ -1,0 +1,20 @@
+version: 2
+
+updates:
+  # Actions are pinned to commit SHAs, Dependabot keeps the SHAs and version comments fresh
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+
+  # Base images are pinned by digest in the Dockerfile
+  - package-ecosystem: docker
+    directory: /app
+    schedule:
+      interval: weekly
+
+  - package-ecosystem: terraform
+    directories:
+      - /infra/modules/*
+    schedule:
+      interval: weekly

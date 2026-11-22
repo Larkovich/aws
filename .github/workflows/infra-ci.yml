@@ -1,0 +1,99 @@
+name: infra-ci
+
+on:
+  pull_request:
+    paths:
+      - "infra/**"
+      - ".github/workflows/infra-*.yml"
+      - "mise.toml"
+
+permissions: {}
+
+concurrency:
+  group: infra-ci-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    shell: bash
+
+env:
+  AWS_REGION: eu-central-1
+
+jobs:
+  validate:
+    name: fmt, validate, lint
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    defaults:
+      run:
+        working-directory: infra
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: jdx/mise-action@924e7c586e33d7d4bae9c14e26c5d22e2beb6e78 # v5.3.0
+        with:
+          install_args: terraform terragrunt tflint
+
+      - name: Format
+        run: |
+          terraform fmt -check -recursive
+          terragrunt hcl fmt --check --working-dir live
+
+      # Modules are validated without a backend, so this job needs no AWS access
+      - name: Validate
+        run: |
+          for module in modules/*/; do
+            echo "::group::$module"
+            terraform -chdir="$module" init -backend=false -input=false
+            terraform -chdir="$module" validate
+            echo "::endgroup::"
+          done
+
+      - name: TFLint
+        env:
+          GITHUB_TOKEN: ${{ github.token }} # avoids API rate limits when downloading the AWS plugin
+        run: |
+          tflint --init --config "$PWD/.tflint.hcl"
+          tflint --recursive --chdir modules --config "$PWD/.tflint.hcl"
+
+  plan:
+    name: plan dev
+    needs: validate
+    if: vars.AWS_PLAN_ROLE_ARN != ''
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    # No environment here: the plan role trusts only the "pull_request" OIDC subject and is read-only
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: jdx/mise-action@924e7c586e33d7d4bae9c14e26c5d22e2beb6e78 # v5.3.0
+        with:
+          install_args: terraform terragrunt
+
+      - uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        with:
+          role-to-assume: ${{ vars.AWS_PLAN_ROLE_ARN }}
+          role-session-name: infra-plan-${{ github.run_id }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      # Read-only role can not write the S3 lock file, plan does not change state anyway
+      - name: Plan
+        working-directory: infra/live/dev
+        run: |
+          terragrunt run --all --non-interactive -- plan -lock=false -no-color 2>&1 | tee plan.txt
+          {
+            echo '### Terragrunt plan (dev)'
+            echo '```'
+            grep -E '^(Plan:|No changes)' plan.txt || true
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"

@@ -1,0 +1,40 @@
+name: security
+
+# Runs on every PR (no path filter), so it can always be a required check
+on:
+  pull_request:
+  push:
+    branches: [main]
+  # Weekly scan catches new CVEs even when nobody changes the code
+  schedule:
+    - cron: "0 6 * * 1"
+
+permissions: {}
+
+concurrency:
+  group: security-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  trivy:
+    name: trivy repo scan
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: jdx/mise-action@924e7c586e33d7d4bae9c14e26c5d22e2beb6e78 # v5.3.0
+        with:
+          install_args: trivy
+
+      # vuln = Go dependencies, secret = leaked keys, misconfig = Terraform and Dockerfile (tfsec rules live in Trivy now)
+      - name: Scan
+        run: trivy fs --scanners vuln,secret,misconfig --severity HIGH,CRITICAL --ignore-unfixed --exit-code 1 .

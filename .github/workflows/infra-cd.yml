@@ -1,0 +1,57 @@
+name: infra-cd
+
+on:
+  push:
+    branches: [main]
+    # Only changes that affect dev, a change in live/prod does not trigger this
+    paths:
+      - "infra/modules/**"
+      - "infra/live/root.hcl"
+      - "infra/live/dev/**"
+      - ".github/workflows/infra-cd.yml"
+  workflow_dispatch:
+
+permissions: {}
+
+# Two applies at the same time would fight for the state lock
+concurrency:
+  group: deploy-infra-dev
+  cancel-in-progress: false
+
+defaults:
+  run:
+    shell: bash
+
+env:
+  AWS_REGION: eu-central-1
+
+jobs:
+  apply:
+    name: apply dev
+    if: vars.AWS_INFRA_ROLE_ARN != ''
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    # Separate environment from the app deploy, so the app pipeline can never get this role
+    environment: dev-infra
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: jdx/mise-action@924e7c586e33d7d4bae9c14e26c5d22e2beb6e78 # v5.3.0
+        with:
+          install_args: terraform terragrunt
+
+      - uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        with:
+          role-to-assume: ${{ vars.AWS_INFRA_ROLE_ARN }}
+          role-session-name: infra-apply-${{ github.run_id }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      # The github-oidc unit is skipped by its exclude block, CI can not change its own access
+      - name: Apply
+        working-directory: infra/live/dev
+        run: terragrunt run --all --non-interactive -- apply -no-color
