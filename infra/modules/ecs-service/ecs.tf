@@ -8,9 +8,13 @@ resource "aws_ecs_cluster" "this" {
 }
 
 resource "aws_security_group" "tasks" {
-  name        = "${var.name}-tasks"
+  name_prefix = "${var.name}-tasks-"
   description = "ECS tasks, reachable only from the load balancer"
   vpc_id      = var.vpc_id
+
+  lifecycle {
+    create_before_destroy = true
+  }
 }
 
 resource "aws_vpc_security_group_ingress_rule" "tasks_from_alb" {
@@ -114,5 +118,5 @@ resource "aws_ecs_service" "this" {
     ignore_changes = [task_definition]
   }
 
-  depends_on = [aws_lb_listener.http]
+  depends_on = [aws_lb_listener.http, aws_iam_role_policy.execution]
 }

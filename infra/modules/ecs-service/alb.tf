@@ -1,7 +1,11 @@
 resource "aws_security_group" "alb" {
-  name        = "${var.name}-alb"
+  name_prefix = "${var.name}-alb-"
   description = "Public HTTP access to the load balancer"
   vpc_id      = var.vpc_id
+
+  lifecycle {
+    create_before_destroy = true
+  }
 }
 
 # Public load balancer has to accept traffic from the whole internet
