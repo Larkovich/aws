@@ -11,6 +11,9 @@ terraform {
   source = "../../../modules//github-oidc"
 }
 
+# Prod sets deletion_protection = true, so terragrunt refuses to destroy it by accident
+prevent_destroy = local.env.deletion_protection
+
 # Bootstrap unit, applied once by an admin from a laptop.
 # CI never applies it, so the pipeline can not change its own permissions.
 exclude {
@@ -24,7 +27,8 @@ dependency "ecr" {
   mock_outputs = {
     repository_arn = "arn:aws:ecr:eu-central-1:111111111111:repository/mock"
   }
-  mock_outputs_allowed_terraform_commands = ["validate", "plan"]
+  mock_outputs_allowed_terraform_commands = ["validate", "plan", "destroy"]
+  mock_outputs_merge_strategy_with_state  = "shallow"
 }
 
 inputs = {

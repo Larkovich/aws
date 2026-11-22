@@ -11,6 +11,9 @@ terraform {
   source = "tfr:///terraform-aws-modules/vpc/aws?version=6.8.0"
 }
 
+# Prod sets deletion_protection = true, so terragrunt refuses to destroy it by accident
+prevent_destroy = local.env.deletion_protection
+
 inputs = {
   cidr = local.env.vpc_cidr
   azs  = local.env.azs
