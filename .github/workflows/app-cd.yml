@@ -6,7 +6,6 @@ on:
     paths:
       - "app/**"
       - ".github/workflows/app-*.yml"
-      - "mise.toml"
   workflow_dispatch:
 
 permissions: {}
@@ -117,17 +116,25 @@ jobs:
             --task-definition "$task_def_arn" > /dev/null
           echo "task_def_arn=$task_def_arn" >> "$GITHUB_OUTPUT"
 
-      # "services-stable" is also true after an automatic rollback, so check what is really running
+      # A stable service is not enough: ECS keeps watching the 5xx alarm after that and can still roll back.
+      # Wait until the rollout itself is COMPLETED, fail when ECS rolled back to another revision.
       - name: Wait for rollout
         env:
           TASK_DEF_ARN: ${{ steps.deploy.outputs.task_def_arn }}
         run: |
-          aws ecs wait services-stable --cluster "$ECS_CLUSTER" --services "$ECS_SERVICE"
+          while true; do
+            out=$(aws ecs describe-services --cluster "$ECS_CLUSTER" --services "$ECS_SERVICE" \
+              --query "services[0].deployments[?status=='PRIMARY'] | [0].[taskDefinition, rolloutState]" --output text)
+            read -r running state <<< "$out"
+            echo "$(date +%T) $state $running"
 
-          running=$(aws ecs describe-services --cluster "$ECS_CLUSTER" --services "$ECS_SERVICE" \
-            --query "services[0].deployments[?status=='PRIMARY'].taskDefinition | [0]" --output text)
-          if [ "$running" != "$TASK_DEF_ARN" ]; then
-            echo "::error::Deployment was rolled back by ECS, still running $running"
-            exit 1
-          fi
-          echo "Deployed $TASK_DEF_ARN" >> "$GITHUB_STEP_SUMMARY"
+            if [ "$running" != "$TASK_DEF_ARN" ] || [ "$state" = "FAILED" ]; then
+              echo "::error::Deployment was rolled back by ECS, running $running"
+              exit 1
+            fi
+            if [ "$state" = "COMPLETED" ]; then
+              echo "Deployed $TASK_DEF_ARN" >> "$GITHUB_STEP_SUMMARY"
+              exit 0
+            fi
+            sleep 15
+          done
