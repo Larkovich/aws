@@ -17,11 +17,15 @@ func newMux(greeting string) *http.ServeMux {
 
 	mux.HandleFunc("GET /health", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+		if err := json.NewEncoder(w).Encode(map[string]string{"status": "ok"}); err != nil {
+			slog.Error("write response failed", "err", err)
+		}
 	})
 
 	mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, r *http.Request) {
-		w.Write([]byte(greeting))
+		if _, err := w.Write([]byte(greeting)); err != nil {
+			slog.Error("write response failed", "err", err)
+		}
 	})
 
 	return mux
@@ -60,5 +64,7 @@ func main() {
 
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	srv.Shutdown(shutdownCtx)
+	if err := srv.Shutdown(shutdownCtx); err != nil {
+		slog.Error("shutdown failed", "err", err)
+	}
 }
