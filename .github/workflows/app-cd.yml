@@ -60,26 +60,41 @@ jobs:
           role-session-name: app-deploy-${{ github.run_id }}
           aws-region: ${{ env.AWS_REGION }}
 
-      - name: Build
-        id: build
+      # Tags are immutable in ECR, so a re-run of the same commit reuses the image that is already there
+      - name: Resolve image
+        id: image
         run: |
           registry="$(aws sts get-caller-identity --query Account --output text).dkr.ecr.${AWS_REGION}.amazonaws.com"
-          image="${registry}/${ECR_REPOSITORY}:${GITHUB_SHA}"
-          docker build --platform linux/arm64 -t "$image" app
           echo "registry=$registry" >> "$GITHUB_OUTPUT"
-          echo "image=$image" >> "$GITHUB_OUTPUT"
+          echo "image=${registry}/${ECR_REPOSITORY}:${GITHUB_SHA}" >> "$GITHUB_OUTPUT"
+
+          digest=$(aws ecr batch-get-image --repository-name "$ECR_REPOSITORY" --image-ids imageTag="$GITHUB_SHA" \
+            --query 'images[0].imageId.imageDigest' --output text)
+          if [ "$digest" = "None" ]; then
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "Image already in ECR ($digest), build skipped" >> "$GITHUB_STEP_SUMMARY"
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Build
+        if: steps.image.outputs.exists == 'false'
+        env:
+          IMAGE: ${{ steps.image.outputs.image }}
+        run: docker build --platform linux/arm64 -t "$IMAGE" app
 
       # Scan the exact image we are about to push
       - name: Scan image
+        if: steps.image.outputs.exists == 'false'
         env:
-          IMAGE: ${{ steps.build.outputs.image }}
+          IMAGE: ${{ steps.image.outputs.image }}
         run: trivy image --severity HIGH,CRITICAL --ignore-unfixed --exit-code 1 "$IMAGE"
 
-      # Tags are immutable in ECR, the git SHA always points to the same image
       - name: Push image
+        if: steps.image.outputs.exists == 'false'
         env:
-          REGISTRY: ${{ steps.build.outputs.registry }}
-          IMAGE: ${{ steps.build.outputs.image }}
+          REGISTRY: ${{ steps.image.outputs.registry }}
+          IMAGE: ${{ steps.image.outputs.image }}
         run: |
           aws ecr get-login-password | docker login --username AWS --password-stdin "$REGISTRY"
           docker push "$IMAGE"
@@ -88,7 +103,7 @@ jobs:
       - name: Deploy
         id: deploy
         env:
-          IMAGE: ${{ steps.build.outputs.image }}
+          IMAGE: ${{ steps.image.outputs.image }}
         run: |
           aws ecs describe-task-definition --task-definition "$TASK_FAMILY" --query taskDefinition > current.json
           jq --arg image "$IMAGE" '
