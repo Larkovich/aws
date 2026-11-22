@@ -8,9 +8,9 @@ locals {
 
   # Which GitHub workflow context can assume which role (the "sub" claim of the OIDC token)
   role_subjects = {
-    plan   = "repo:${var.github_repository}:pull_request"
-    infra  = "repo:${var.github_repository}:environment:${var.github_environment}-infra"
-    deploy = "repo:${var.github_repository}:environment:${var.github_environment}"
+    plan   = "${var.github_subject_prefix}:pull_request"
+    infra  = "${var.github_subject_prefix}:environment:${var.github_environment}-infra"
+    deploy = "${var.github_subject_prefix}:environment:${var.github_environment}"
   }
 }
 

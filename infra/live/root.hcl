@@ -1,3 +1,7 @@
+# Always Terraform (same as CI), even when OpenTofu is installed on the machine
+terraform_binary             = "terraform"
+terraform_version_constraint = ">= 1.10"
+
 locals {
   env     = read_terragrunt_config(find_in_parent_folders("env.hcl")).locals
   project = "status-api"
