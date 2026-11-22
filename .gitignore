@@ -1,0 +1,19 @@
+# terraform / terragrunt
+.terraform/
+.terragrunt-cache/
+*.tfstate
+*.tfstate.*
+*.tfplan
+crash.log
+
+# go
+app/status-api
+
+# local secrets
+.env
+.env.*
+
+# ide / os
+.idea/
+.vscode/
+.DS_Store

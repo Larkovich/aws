@@ -1,0 +1,7 @@
+[tools]
+go = "1.27.3"
+terraform = "1.17.0"
+terragrunt = "1.2.0"
+tflint = "0.65.0"
+trivy = "0.76.1"
+hadolint = "2.15.1"
