@@ -28,7 +28,7 @@ dependency "ecr" {
 }
 
 inputs = {
-  github_repository       = "Larkovich/aws"
+  github_subject_prefix   = "repo:Larkovich@71225579/aws@1467819181"
   github_environment      = local.env.environment
   ecr_repository_arn      = dependency.ecr.outputs.repository_arn
   ecs_cluster_name        = include.root.locals.name

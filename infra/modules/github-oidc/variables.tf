@@ -3,9 +3,14 @@ variable "name" {
   type        = string
 }
 
-variable "github_repository" {
-  description = "GitHub repository in owner/name format"
+variable "github_subject_prefix" {
+  description = "Start of the OIDC sub claim. Immutable format repo:owner@owner_id/name@repo_id, so a renamed or re-created repo with the same name can not assume the roles"
   type        = string
+
+  validation {
+    condition     = startswith(var.github_subject_prefix, "repo:")
+    error_message = "Must start with repo:, see: gh api repos/OWNER/REPO/actions/oidc/customization/sub"
+  }
 }
 
 variable "github_environment" {
