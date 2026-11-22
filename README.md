@@ -226,3 +226,7 @@ For prod I would add:
 - No domain, so the ALB listens on HTTP.
 - The app needs no secrets and no AWS API access. If it did, secrets would live in Secrets Manager or SSM Parameter Store and ECS would inject them through `secrets` in the task definition, with `GetSecretValue` for the execution role on that one ARN. CI secrets would be GitHub environment secrets.
 - From the optional tasks I picked the CloudWatch 5xx alarm.
+
+## Time spent
+
+About 3.5 hours: roughly 1 hour of reading the brief, planning and the first version of the app, then 2.5 hours from the first commit to the last merge (infra, pipelines, deployment to AWS, review and fixes).
