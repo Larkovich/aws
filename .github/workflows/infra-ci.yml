@@ -64,7 +64,8 @@ jobs:
   plan:
     name: plan dev
     needs: validate
-    if: vars.AWS_PLAN_ROLE_ARN != ''
+    # PRs from forks get no OIDC token, so there is nothing to plan with
+    if: vars.AWS_PLAN_ROLE_ARN != '' && !github.event.pull_request.head.repo.fork
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     # No environment here: the plan role trusts only the "pull_request" OIDC subject and is read-only
@@ -90,10 +91,11 @@ jobs:
       - name: Plan
         working-directory: infra/live/dev
         run: |
-          terragrunt run --all --non-interactive -- plan -lock=false -no-color 2>&1 | tee plan.txt
+          terragrunt run --all --non-interactive --no-color -- plan -lock=false -no-color 2>&1 | tee plan.txt
           {
             echo '### Terragrunt plan (dev)'
             echo '```'
-            grep -E '^(Plan:|No changes)' plan.txt || true
+            # Terragrunt prefixes every line with time and unit, keep only "unit: result"
+            grep -E 'Plan:|No changes' plan.txt | sed -E 's/^.*\[([^]]+)\] terraform: /\1: /' || true
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
