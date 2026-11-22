@@ -1,7 +1,7 @@
 # Enviroment specific settings. Every unit in this folder reads this file.
 locals {
   environment = "dev"
-  account_id  = "111111111111"
+  account_id  = "065306945239"
   region      = "eu-central-1"
 
   # Network
