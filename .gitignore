@@ -5,6 +5,7 @@
 *.tfstate.*
 *.tfplan
 crash.log
+infra/modules/*/.terraform.lock.hcl
 
 # go
 app/status-api
