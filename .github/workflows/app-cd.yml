@@ -1,0 +1,118 @@
+name: app-cd
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "app/**"
+      - ".github/workflows/app-*.yml"
+      - "mise.toml"
+  workflow_dispatch:
+
+permissions: {}
+
+# Never cancel a running deployment, the next one waits in the queue
+concurrency:
+  group: deploy-app-dev
+  cancel-in-progress: false
+
+defaults:
+  run:
+    shell: bash
+
+env:
+  AWS_REGION: eu-central-1
+  ECR_REPOSITORY: status-api-dev
+  ECS_CLUSTER: status-api-dev
+  ECS_SERVICE: status-api-dev
+  TASK_FAMILY: status-api-dev
+
+jobs:
+  ci:
+    uses: ./.github/workflows/app-ci.yml
+    permissions:
+      contents: read
+
+  deploy:
+    name: deploy to dev
+    needs: ci
+    # Skipped untill the AWS role is configured, so the repo also works without an AWS account
+    if: vars.AWS_DEPLOY_ROLE_ARN != ''
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    # Environment "dev" is limited to the main branch, the IAM role trusts only this environment
+    environment: dev
+    permissions:
+      contents: read
+      id-token: write # request the OIDC token, there are no static AWS keys
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: jdx/mise-action@924e7c586e33d7d4bae9c14e26c5d22e2beb6e78 # v5.3.0
+        with:
+          install_args: trivy
+
+      - uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          role-session-name: app-deploy-${{ github.run_id }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Build
+        id: build
+        run: |
+          registry="$(aws sts get-caller-identity --query Account --output text).dkr.ecr.${AWS_REGION}.amazonaws.com"
+          image="${registry}/${ECR_REPOSITORY}:${GITHUB_SHA}"
+          docker build --platform linux/arm64 -t "$image" app
+          echo "registry=$registry" >> "$GITHUB_OUTPUT"
+          echo "image=$image" >> "$GITHUB_OUTPUT"
+
+      # Scan the exact image we are about to push
+      - name: Scan image
+        env:
+          IMAGE: ${{ steps.build.outputs.image }}
+        run: trivy image --severity HIGH,CRITICAL --ignore-unfixed --exit-code 1 "$IMAGE"
+
+      # Tags are immutable in ECR, the git SHA always points to the same image
+      - name: Push image
+        env:
+          REGISTRY: ${{ steps.build.outputs.registry }}
+          IMAGE: ${{ steps.build.outputs.image }}
+        run: |
+          aws ecr get-login-password | docker login --username AWS --password-stdin "$REGISTRY"
+          docker push "$IMAGE"
+
+      # Terraform owns the task definition (env vars, CPU, roles), CI only swaps the image
+      - name: Deploy
+        id: deploy
+        env:
+          IMAGE: ${{ steps.build.outputs.image }}
+        run: |
+          aws ecs describe-task-definition --task-definition "$TASK_FAMILY" --query taskDefinition > current.json
+          jq --arg image "$IMAGE" '
+            .containerDefinitions[0].image = $image
+            | del(.taskDefinitionArn, .revision, .status, .requiresAttributes, .compatibilities, .registeredAt, .registeredBy)
+          ' current.json > new.json
+
+          task_def_arn=$(aws ecs register-task-definition --cli-input-json file://new.json \
+            --query taskDefinition.taskDefinitionArn --output text)
+          aws ecs update-service --cluster "$ECS_CLUSTER" --service "$ECS_SERVICE" \
+            --task-definition "$task_def_arn" > /dev/null
+          echo "task_def_arn=$task_def_arn" >> "$GITHUB_OUTPUT"
+
+      # "services-stable" is also true after an automatic rollback, so check what is really running
+      - name: Wait for rollout
+        env:
+          TASK_DEF_ARN: ${{ steps.deploy.outputs.task_def_arn }}
+        run: |
+          aws ecs wait services-stable --cluster "$ECS_CLUSTER" --services "$ECS_SERVICE"
+
+          running=$(aws ecs describe-services --cluster "$ECS_CLUSTER" --services "$ECS_SERVICE" \
+            --query "services[0].deployments[?status=='PRIMARY'].taskDefinition | [0]" --output text)
+          if [ "$running" != "$TASK_DEF_ARN" ]; then
+            echo "::error::Deployment was rolled back by ECS, still running $running"
+            exit 1
+          fi
+          echo "Deployed $TASK_DEF_ARN" >> "$GITHUB_STEP_SUMMARY"
