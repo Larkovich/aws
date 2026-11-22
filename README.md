@@ -208,7 +208,3 @@ For prod I would add:
 - One AWS account per environment, only dev exists.
 - No domain, so the ALB listens on HTTP.
 - The app needs no secrets and no AWS API access. From the optional tasks I picked the CloudWatch 5xx alarm.
-
-## Time spent
-
-About X hours.
